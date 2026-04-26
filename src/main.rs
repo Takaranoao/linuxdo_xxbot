@@ -39,7 +39,9 @@ async fn main() -> Result<()> {
     let schedule = Schedule::parse(&config.cron_expr)?;
 
     let handle = ClientHandle::build(&config, proxy_url).await?;
-    handle.ensure_logged_in(&config.api_hash).await?;
+    handle
+        .ensure_logged_in(config.api_id, &config.api_hash, config.login_method)
+        .await?;
 
     let peer = handle.resolve_target(&target).await?;
     log::info!(

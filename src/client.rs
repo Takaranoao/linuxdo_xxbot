@@ -10,6 +10,8 @@ use grammers_tl_types as tl;
 use tokio::task::JoinHandle;
 
 use crate::config::Config;
+#[cfg(feature = "passkey-login")]
+use crate::passkey;
 use crate::target::Target;
 
 pub struct ClientHandle {
@@ -48,10 +50,60 @@ impl ClientHandle {
         })
     }
 
-    pub async fn ensure_logged_in(&self, api_hash: &str) -> Result<()> {
+    pub async fn ensure_logged_in(
+        &self,
+        api_id: i32,
+        api_hash: &str,
+        method: crate::config::LoginMethod,
+    ) -> Result<()> {
+        use crate::config::LoginMethod;
         if self.client.is_authorized().await? {
             return Ok(());
         }
+        match method {
+            LoginMethod::Password => self.login_with_password(api_hash).await,
+            LoginMethod::Passkey => {
+                #[cfg(feature = "passkey-login")]
+                {
+                    self.login_with_passkey(api_id, api_hash).await
+                }
+                #[cfg(not(feature = "passkey-login"))]
+                {
+                    let _ = (api_id, api_hash);
+                    Err(anyhow!(
+                        "LOGIN_METHOD=passkey requires passkey-login feature; \
+                         rebuild with `cargo build --features passkey-login` \
+                         or set LOGIN_METHOD=password"
+                    ))
+                }
+            }
+            LoginMethod::Auto => {
+                #[cfg(feature = "passkey-login")]
+                {
+                    log::info!(
+                        "LOGIN_METHOD=auto: attempting passkey first (set LOGIN_METHOD=password to skip)"
+                    );
+                    match self.login_with_passkey(api_id, api_hash).await {
+                        Ok(()) => Ok(()),
+                        Err(e) => {
+                            log::warn!("passkey login failed ({e}); falling back to SMS+password");
+                            self.login_with_password(api_hash).await
+                        }
+                    }
+                }
+                #[cfg(not(feature = "passkey-login"))]
+                {
+                    let _ = api_id;
+                    log::info!(
+                        "LOGIN_METHOD=auto with passkey-login feature disabled at compile time; using password"
+                    );
+                    self.login_with_password(api_hash).await
+                }
+            }
+        }
+    }
+
+    async fn login_with_password(&self, api_hash: &str) -> Result<()> {
         let phone = prompt("Phone number (international format, e.g. +1...): ")?;
         let token = self
             .client
@@ -136,6 +188,52 @@ impl ClientHandle {
             .await
             .map(drop)
             .map_err(|e| anyhow!("messages.SendMessage failed: {e}"))
+    }
+
+    #[cfg(feature = "passkey-login")]
+    pub async fn login_with_passkey(&self, api_id: i32, api_hash: &str) -> Result<()> {
+        // 外层 ensure_logged_in 已检查 is_authorized;此函数也允许独立调用,
+        // 所以再 guard 一次保证幂等。
+        if self.client.is_authorized().await? {
+            return Ok(());
+        }
+
+        let init: tl::enums::auth::PasskeyLoginOptions = self
+            .client
+            .invoke(&tl::functions::auth::InitPasskeyLogin {
+                api_id,
+                api_hash: api_hash.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow!("auth.initPasskeyLogin failed: {e}"))?;
+        let options_json = match init {
+            tl::enums::auth::PasskeyLoginOptions::Options(o) => match o.options {
+                tl::enums::DataJson::Json(d) => d.data,
+            },
+        };
+        log::debug!("passkey options JSON: {options_json}");
+
+        let opts = passkey::PasskeyOptions::from_json(&options_json)
+            .with_context(|| "parsing PublicKeyCredentialRequestOptions")?;
+        // Telegram options 一般不带 origin;统一用 https://{rp_id}
+        let origin = format!("https://{}", opts.rp_id);
+
+        log::info!("triggering passkey authenticator (rp_id={})", opts.rp_id);
+        let assertion = passkey::perform_authentication(&opts, &origin).await?;
+
+        let credential = passkey::build_tl_credential(&assertion)?;
+
+        let _auth: tl::enums::auth::Authorization = self
+            .client
+            .invoke(&tl::functions::auth::FinishPasskeyLogin {
+                credential,
+                from_dc_id: None,
+                from_auth_key_id: None,
+            })
+            .await
+            .map_err(|e| anyhow!("auth.finishPasskeyLogin failed: {e}"))?;
+        log::info!("passkey login successful");
+        Ok(())
     }
 }
 

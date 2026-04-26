@@ -8,6 +8,7 @@
 
 - **标准 5 字段 crontab** 表达式(`分 时 日 月 周`,与 Linux 一致)
 - **用户账号登录**(非 bot;首次手机+验证码,支持两步验证)
+- **Passkey 登录**(可选,默认开):caBLE/Hybrid 模式 — 终端打 QR,手机(同 iCloud / Google 账号)扫码后用 Touch ID / Face ID / 指纹完成 WebAuthn 断言;`LOGIN_METHOD=auto` 时失败自动 fallback 到密码
 - **四种发送场景**:直发 / 发到论坛 topic / 回复指定消息 / topic 内回复
 - **HTTP / SOCKS5 代理**,支持用户名密码认证
 - **SQLite session 持久化**,登录一次永久复用
@@ -65,6 +66,7 @@ cargo run --release
 |---|---|---|
 | `API_ID` | ✓ | Telegram API ID |
 | `API_HASH` | ✓ | Telegram API hash |
+| `LOGIN_METHOD` |  | `auto`(默认) / `passkey` / `password`;详见下文「登录方式」 |
 | `TARGET_CHAT` | ✓ | `@username` 或数字 chat id(`-1001234567890` 格式;必须在你账号的 dialogs 中) |
 | `CRON` | ✓ | 5 字段 crontab,如 `*/5 * * * *`(每 5 分钟) |
 | `MESSAGE` | ✓ | 要发送的固定文本 |
@@ -97,11 +99,50 @@ cargo run --release
 
 时区:**UTC**。如需按本地时间触发,自己换算。
 
+## 登录方式
+
+`LOGIN_METHOD` 控制登录链路:
+
+| 值 | 行为 | 适用场景 |
+|---|---|---|
+| `auto`(默认) | 先试 passkey;失败 → 自动 fallback 到 SMS+密码 | 不知道账号是否有 passkey 的常规用户 |
+| `passkey` | 强制 passkey,失败 bail | CI / 已确认账号必走 passkey |
+| `password` | 跳过 passkey,直接 SMS+(可选 2FA 密码) | 账号没 passkey、或不想触发 authenticator 弹窗 |
+
+`auto` / `passkey` 模式下程序会调起 caBLE/Hybrid authenticator:
+
+| 平台 | 体验 |
+|---|---|
+| macOS | **终端打 QR + caBLE link → iPhone 扫码 → 弹 Touch ID / Face ID** |
+| Linux | 同上(QR → 手机) |
+| Windows | 同上(QR → 手机) |
+
+> **macOS Touch ID 不能直接弹**:Apple `ASAuthorization` 要求 native CLI 走 bundle + entitlement,我们绕不过去。Hybrid 协议(QR + iPhone)等价的 RP assertion 也能完成 Telegram 服务端验证 — 这是 macOS CLI 用 iCloud Keychain passkey 的唯一干净路径。
+>
+> **USB FIDO2 硬件 key 暂未启用**(已在 dep 里、待后续开启)。当前 v0.2 只走 cable transport。
+
+### 编译时关闭 passkey 支持
+
+```bash
+cargo build --no-default-features
+```
+
+此时:
+- `LOGIN_METHOD=auto` → 直接走密码路径(passkey 编译时被剔除,无 fallback 提示)
+- `LOGIN_METHOD=passkey` → 启动报错,提示用 `--features passkey-login` 重编或改成 `password`
+- `LOGIN_METHOD=password` → 与有 feature 时行为一致
+
 ## 开发
 
 ```bash
-# 跑全部测试(28 单测 + 1 集成测试)
-cargo test
+# 跑全部测试(45 单测 + 1 集成测试,需 --features passkey-login)
+cargo test --features passkey-login
+
+# 不带 passkey 跑(34 单测 + 1 集成)
+cargo test --no-default-features
+
+# 只跑某模块
+cargo test --lib config::
 
 # 只跑某模块
 cargo test --lib config::
@@ -124,7 +165,8 @@ src/
 ├── proxy.rs        # 代理 URL 构造 + percent-encode,内联单测
 ├── schedule.rs     # saffron crontab 包装,内联单测
 ├── target.rs       # @username / 数字 id 解析,内联单测
-└── client.rs       # grammers 薄封装,无单测;send() 走 raw messages.SendMessage
+├── client.rs       # grammers 薄封装,无单测;send() 走 raw messages.SendMessage
+└── passkey.rs      # WebAuthn options/credential ↔ TL 桥接(纯函数 TDD)+ 异步 authenticator runner
 
 tests/
 └── config_integration.rs  # 端到端配置 round-trip

@@ -14,6 +14,7 @@ fn full_env() -> HashMap<String, String> {
         ("TARGET_REPLY_TO_MSG_ID", "98765"),
         ("CRON", "0 9 * * *"),
         ("MESSAGE", "good morning"),
+        ("LOGIN_METHOD", "passkey"),
         ("TG_PROXY_TYPE", "socks5"),
         ("TG_PROXY_HOST", "127.0.0.1:1080"),
         ("TG_PROXY_USERNAME", "user"),
@@ -40,4 +41,6 @@ fn full_env_round_trip() {
     )
     .unwrap();
     assert_eq!(url.as_deref(), Some("socks5://user:p%40ss@127.0.0.1:1080"));
+    use tg_cron_sender::config::LoginMethod;
+    assert_eq!(cfg.login_method, LoginMethod::Passkey);
 }

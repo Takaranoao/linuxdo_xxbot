@@ -1,0 +1,13 @@
+{
+  "rpId": "web.telegram.org",
+  "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "timeout": 60000,
+  "userVerification": "preferred",
+  "allowCredentials": [
+    {
+      "type": "public-key",
+      "id": "Y3JlZGVudGlhbDFhYmNkZWZnaGlqa2xtbm9wcXJzdHV2",
+      "transports": ["internal", "hybrid"]
+    }
+  ]
+}

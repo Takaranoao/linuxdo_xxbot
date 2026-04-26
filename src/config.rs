@@ -2,6 +2,29 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, anyhow};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMethod {
+    /// 试 passkey,失败 fallback 到密码(默认)
+    Auto,
+    /// 强制 passkey,失败 bail
+    Passkey,
+    /// 跳过 passkey,只用 SMS+可选 2FA 密码
+    Password,
+}
+
+impl LoginMethod {
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "auto" => Ok(Self::Auto),
+            "passkey" => Ok(Self::Passkey),
+            "password" => Ok(Self::Password),
+            other => Err(anyhow!(
+                "LOGIN_METHOD must be auto|passkey|password, got {other:?}"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub api_id: i32,
@@ -16,6 +39,7 @@ pub struct Config {
     pub proxy_host: Option<String>,
     pub proxy_username: Option<String>,
     pub proxy_password: Option<String>,
+    pub login_method: LoginMethod,
 }
 
 fn get_required<'a>(map: &'a HashMap<String, String>, key: &str) -> Result<&'a str> {
@@ -67,6 +91,7 @@ impl Config {
             proxy_host: get_optional(map, "TG_PROXY_HOST").map(str::to_string),
             proxy_username: get_optional(map, "TG_PROXY_USERNAME").map(str::to_string),
             proxy_password: get_optional(map, "TG_PROXY_PASSWORD").map(str::to_string),
+            login_method: LoginMethod::parse(get_optional(map, "LOGIN_METHOD").unwrap_or(""))?,
         })
     }
 }
@@ -168,5 +193,58 @@ mod tests {
         assert_eq!(cfg.proxy_host.as_deref(), Some("127.0.0.1:1080"));
         assert_eq!(cfg.proxy_username.as_deref(), Some("u"));
         assert_eq!(cfg.proxy_password.as_deref(), Some("p"));
+    }
+
+    #[test]
+    fn login_method_default_is_auto() {
+        let cfg = Config::from_map(&base_map()).unwrap();
+        assert_eq!(cfg.login_method, LoginMethod::Auto);
+    }
+
+    #[test]
+    fn login_method_explicit_auto() {
+        let mut m = base_map();
+        m.insert("LOGIN_METHOD".into(), "auto".into());
+        assert_eq!(
+            Config::from_map(&m).unwrap().login_method,
+            LoginMethod::Auto
+        );
+    }
+
+    #[test]
+    fn login_method_explicit_password() {
+        let mut m = base_map();
+        m.insert("LOGIN_METHOD".into(), "password".into());
+        assert_eq!(
+            Config::from_map(&m).unwrap().login_method,
+            LoginMethod::Password
+        );
+    }
+
+    #[test]
+    fn login_method_passkey() {
+        let mut m = base_map();
+        m.insert("LOGIN_METHOD".into(), "passkey".into());
+        assert_eq!(
+            Config::from_map(&m).unwrap().login_method,
+            LoginMethod::Passkey
+        );
+    }
+
+    #[test]
+    fn login_method_case_insensitive() {
+        let mut m = base_map();
+        m.insert("LOGIN_METHOD".into(), "Auto".into());
+        assert_eq!(
+            Config::from_map(&m).unwrap().login_method,
+            LoginMethod::Auto
+        );
+    }
+
+    #[test]
+    fn login_method_invalid_errors() {
+        let mut m = base_map();
+        m.insert("LOGIN_METHOD".into(), "totp".into());
+        assert!(Config::from_map(&m).is_err());
     }
 }

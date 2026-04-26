@@ -19,6 +19,17 @@ grammers-mtsender = { path = "/Users/takaranoao/git/grammers/grammers-mtsender",
 grammers-session = { path = "/Users/takaranoao/git/grammers/grammers-session" }
 grammers-tl-types = { path = "/Users/takaranoao/git/grammers/grammers-tl-types" }
 
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+webauthn-authenticator-rs = { version = "0.6.0-dev", default-features = false, features = ["usb", "cable", "qrcode"], optional = true }
+webauthn-rs-proto = { version = "0.6.0-dev", optional = true }
+url = { version = "2", optional = true }
+
+[features]
+default = ["passkey-login"]
+passkey-login = ["dep:webauthn-authenticator-rs", "dep:webauthn-rs-proto", "dep:serde", "dep:serde_json", "dep:base64", "dep:url"]
+
 [dev-dependencies]
 pretty_assertions = "1"
 
