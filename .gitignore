@@ -1,0 +1,7 @@
+/target
+.env
+*.session
+*.session-journal
+*.session-shm
+*.session-wal
+.DS_Store

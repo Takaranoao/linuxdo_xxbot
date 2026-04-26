@@ -1,0 +1,30 @@
+[package]
+name = "tg-cron-sender"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dotenvy = "0.15"
+log = "0.4"
+rand = "0.8"
+saffron = "0.1"
+simple_logger = "5"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+
+grammers-client = { path = "/Users/takaranoao/git/grammers/grammers-client", features = ["proxy"] }
+grammers-mtsender = { path = "/Users/takaranoao/git/grammers/grammers-mtsender", features = ["proxy"] }
+grammers-session = { path = "/Users/takaranoao/git/grammers/grammers-session" }
+grammers-tl-types = { path = "/Users/takaranoao/git/grammers/grammers-tl-types" }
+
+[dev-dependencies]
+pretty_assertions = "1"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "tg-cron-sender"
+path = "src/main.rs"
