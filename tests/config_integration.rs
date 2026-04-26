@@ -19,6 +19,7 @@ fn full_env() -> HashMap<String, String> {
         ("TG_PROXY_HOST", "127.0.0.1:1080"),
         ("TG_PROXY_USERNAME", "user"),
         ("TG_PROXY_PASSWORD", "p@ss"),
+        ("USE_IPV6", "true"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -42,4 +43,5 @@ fn full_env_round_trip() {
     )
     .unwrap();
     assert_eq!(url.as_deref(), Some("socks5://user:p%40ss@127.0.0.1:1080"));
+    assert!(cfg.network.use_ipv6);
 }

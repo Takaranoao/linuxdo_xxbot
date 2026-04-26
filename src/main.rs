@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     let target = parse_target(&config.job.target_chat)?;
     let schedule = Schedule::parse(&config.job.cron_expr)?;
 
-    let handle = ClientHandle::build(&config.account, proxy_url).await?;
+    let handle = ClientHandle::build(&config.account, &config.network, proxy_url).await?;
     auth::ensure_logged_in(
         &handle.client,
         config.account.api_id,

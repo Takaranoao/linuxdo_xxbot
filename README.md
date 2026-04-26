@@ -77,6 +77,7 @@ cargo run --release
 | `TG_PROXY_HOST` |  | `host:port` 格式 |
 | `TG_PROXY_USERNAME` |  | 代理用户名(可选) |
 | `TG_PROXY_PASSWORD` |  | 代理密码(可选) |
+| `USE_IPV6` |  | `true` / `false`(默认),走 IPv6 socket 连接 Telegram DC |
 
 ### 发送行为矩阵
 
@@ -135,10 +136,10 @@ cargo build --no-default-features
 ## 开发
 
 ```bash
-# 跑全部测试(45 单测 + 1 集成测试,需 --features passkey-login)
+# 跑全部测试(50 单测 + 1 集成测试,需 --features passkey-login)
 cargo test --features passkey-login
 
-# 不带 passkey 跑(34 单测 + 1 集成)
+# 不带 passkey 跑(39 单测 + 1 集成)
 cargo test --no-default-features
 
 # 只跑某模块

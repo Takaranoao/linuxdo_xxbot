@@ -8,7 +8,7 @@ use grammers_session::storages::SqliteSession;
 use grammers_tl_types as tl;
 use tokio::task::JoinHandle;
 
-use crate::config::AccountConfig;
+use crate::config::{AccountConfig, NetworkConfig};
 use crate::target::Target;
 
 pub struct ClientHandle {
@@ -20,7 +20,11 @@ pub struct ClientHandle {
 impl ClientHandle {
     /// 打开 session 文件、起 SenderPool、spawn pool runner。
     /// **不做认证** — 调用方拿到后用 `crate::auth::ensure_logged_in(&handle.client, ...)` 自行登录。
-    pub async fn build(account: &AccountConfig, proxy_url: Option<String>) -> Result<Self> {
+    pub async fn build(
+        account: &AccountConfig,
+        network: &NetworkConfig,
+        proxy_url: Option<String>,
+    ) -> Result<Self> {
         let session = Arc::new(
             SqliteSession::open(&account.session_path)
                 .await
@@ -29,6 +33,7 @@ impl ClientHandle {
 
         let params = ConnectionParams {
             proxy_url,
+            use_ipv6: network.use_ipv6,
             ..Default::default()
         };
 

@@ -43,6 +43,13 @@ pub struct ProxyConfig {
     pub proxy_password: Option<String>,
 }
 
+/// MTProto 传输层配置(全局)。当前只有一个 IPv6 socket 开关;
+/// 用 grammers 内置的官方 DC 列表,不做地址 / 密钥级覆盖。
+#[derive(Debug, Clone, Default)]
+pub struct NetworkConfig {
+    pub use_ipv6: bool,
+}
+
 /// 单个 cron 发送任务 — 多账号场景下也是每账号(或多任务)一份。
 #[derive(Debug, Clone)]
 pub struct JobConfig {
@@ -53,12 +60,13 @@ pub struct JobConfig {
     pub message: String,
 }
 
-/// 当前 v0.2 单账号容器:account + proxy + job 各一份。
-/// 未来多账号时,可改成 `Vec<(AccountConfig, JobConfig)> + ProxyConfig`。
+/// 当前 v0.2 单账号容器:account + proxy + network + job 各一份。
+/// 未来多账号时,可改成 `Vec<(AccountConfig, JobConfig)> + ProxyConfig + NetworkConfig`。
 #[derive(Debug, Clone)]
 pub struct Config {
     pub account: AccountConfig,
     pub proxy: ProxyConfig,
+    pub network: NetworkConfig,
     pub job: JobConfig,
 }
 
@@ -71,6 +79,14 @@ fn get_required<'a>(map: &'a HashMap<String, String>, key: &str) -> Result<&'a s
 
 fn get_optional<'a>(map: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
     map.get(key).map(|s| s.as_str()).filter(|s| !s.is_empty())
+}
+
+fn parse_bool(s: &str) -> Result<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        other => Err(anyhow!("invalid boolean: {other:?}")),
+    }
 }
 
 fn parse_optional_i32(map: &HashMap<String, String>, key: &str) -> Result<Option<i32>> {
@@ -111,6 +127,16 @@ impl ProxyConfig {
     }
 }
 
+impl NetworkConfig {
+    pub fn from_map(map: &HashMap<String, String>) -> Result<Self> {
+        let use_ipv6 = match get_optional(map, "USE_IPV6") {
+            None => false,
+            Some(s) => parse_bool(s).with_context(|| format!("USE_IPV6 invalid: {s:?}"))?,
+        };
+        Ok(Self { use_ipv6 })
+    }
+}
+
 impl JobConfig {
     pub fn from_map(map: &HashMap<String, String>) -> Result<Self> {
         Ok(Self {
@@ -128,6 +154,7 @@ impl Config {
         Ok(Self {
             account: AccountConfig::from_map(map)?,
             proxy: ProxyConfig::from_map(map),
+            network: NetworkConfig::from_map(map)?,
             job: JobConfig::from_map(map)?,
         })
     }
@@ -283,5 +310,50 @@ mod tests {
         let mut m = base_map();
         m.insert("LOGIN_METHOD".into(), "totp".into());
         assert!(Config::from_map(&m).is_err());
+    }
+
+    #[test]
+    fn use_ipv6_defaults_to_false() {
+        let cfg = Config::from_map(&base_map()).unwrap();
+        assert!(!cfg.network.use_ipv6);
+    }
+
+    #[test]
+    fn use_ipv6_empty_is_default() {
+        let mut m = base_map();
+        m.insert("USE_IPV6".into(), "".into());
+        assert!(!Config::from_map(&m).unwrap().network.use_ipv6);
+    }
+
+    #[test]
+    fn use_ipv6_truthy_values() {
+        for v in ["true", "1", "yes", "on", "TRUE"] {
+            let mut m = base_map();
+            m.insert("USE_IPV6".into(), v.into());
+            assert!(
+                Config::from_map(&m).unwrap().network.use_ipv6,
+                "expected USE_IPV6={v} to parse as true"
+            );
+        }
+    }
+
+    #[test]
+    fn use_ipv6_falsy_values() {
+        for v in ["false", "0", "no", "off", "FALSE"] {
+            let mut m = base_map();
+            m.insert("USE_IPV6".into(), v.into());
+            assert!(
+                !Config::from_map(&m).unwrap().network.use_ipv6,
+                "expected USE_IPV6={v} to parse as false"
+            );
+        }
+    }
+
+    #[test]
+    fn use_ipv6_invalid_errors() {
+        let mut m = base_map();
+        m.insert("USE_IPV6".into(), "maybe".into());
+        let err = Config::from_map(&m).unwrap_err().to_string();
+        assert!(err.contains("USE_IPV6"), "got: {err}");
     }
 }
