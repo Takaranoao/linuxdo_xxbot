@@ -25,21 +25,41 @@ impl LoginMethod {
     }
 }
 
+/// 单个账号的认证 / session 配置 — 多账号场景下每账号一份。
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct AccountConfig {
     pub api_id: i32,
     pub api_hash: String,
     pub session_path: String,
+    pub login_method: LoginMethod,
+}
+
+/// 网络代理配置(全局,所有账号共用,因为 Telegram dc 路由是全局的)。
+#[derive(Debug, Clone, Default)]
+pub struct ProxyConfig {
+    pub proxy_type: Option<String>,
+    pub proxy_host: Option<String>,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
+}
+
+/// 单个 cron 发送任务 — 多账号场景下也是每账号(或多任务)一份。
+#[derive(Debug, Clone)]
+pub struct JobConfig {
     pub target_chat: String,
     pub target_topic_id: Option<i32>,
     pub target_reply_to_msg_id: Option<i32>,
     pub cron_expr: String,
     pub message: String,
-    pub proxy_type: Option<String>,
-    pub proxy_host: Option<String>,
-    pub proxy_username: Option<String>,
-    pub proxy_password: Option<String>,
-    pub login_method: LoginMethod,
+}
+
+/// 当前 v0.2 单账号容器:account + proxy + job 各一份。
+/// 未来多账号时,可改成 `Vec<(AccountConfig, JobConfig)> + ProxyConfig`。
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub account: AccountConfig,
+    pub proxy: ProxyConfig,
+    pub job: JobConfig,
 }
 
 fn get_required<'a>(map: &'a HashMap<String, String>, key: &str) -> Result<&'a str> {
@@ -64,34 +84,51 @@ fn parse_optional_i32(map: &HashMap<String, String>, key: &str) -> Result<Option
     }
 }
 
-impl Config {
+impl AccountConfig {
     pub fn from_map(map: &HashMap<String, String>) -> Result<Self> {
         let api_id = get_required(map, "API_ID")?
             .parse::<i32>()
             .with_context(|| "API_ID must be a 32-bit integer")?;
-        let api_hash = get_required(map, "API_HASH")?.to_string();
-        let target_chat = get_required(map, "TARGET_CHAT")?.to_string();
-        let cron_expr = get_required(map, "CRON")?.to_string();
-        let message = get_required(map, "MESSAGE")?.to_string();
-        let session_path = get_optional(map, "SESSION_PATH")
-            .unwrap_or("tg-cron-sender.session")
-            .to_string();
-        let target_topic_id = parse_optional_i32(map, "TARGET_TOPIC_ID")?;
-        let target_reply_to_msg_id = parse_optional_i32(map, "TARGET_REPLY_TO_MSG_ID")?;
         Ok(Self {
             api_id,
-            api_hash,
-            session_path,
-            target_chat,
-            target_topic_id,
-            target_reply_to_msg_id,
-            cron_expr,
-            message,
+            api_hash: get_required(map, "API_HASH")?.to_string(),
+            session_path: get_optional(map, "SESSION_PATH")
+                .unwrap_or("tg-cron-sender.session")
+                .to_string(),
+            login_method: LoginMethod::parse(get_optional(map, "LOGIN_METHOD").unwrap_or(""))?,
+        })
+    }
+}
+
+impl ProxyConfig {
+    pub fn from_map(map: &HashMap<String, String>) -> Self {
+        Self {
             proxy_type: get_optional(map, "TG_PROXY_TYPE").map(str::to_string),
             proxy_host: get_optional(map, "TG_PROXY_HOST").map(str::to_string),
             proxy_username: get_optional(map, "TG_PROXY_USERNAME").map(str::to_string),
             proxy_password: get_optional(map, "TG_PROXY_PASSWORD").map(str::to_string),
-            login_method: LoginMethod::parse(get_optional(map, "LOGIN_METHOD").unwrap_or(""))?,
+        }
+    }
+}
+
+impl JobConfig {
+    pub fn from_map(map: &HashMap<String, String>) -> Result<Self> {
+        Ok(Self {
+            target_chat: get_required(map, "TARGET_CHAT")?.to_string(),
+            target_topic_id: parse_optional_i32(map, "TARGET_TOPIC_ID")?,
+            target_reply_to_msg_id: parse_optional_i32(map, "TARGET_REPLY_TO_MSG_ID")?,
+            cron_expr: get_required(map, "CRON")?.to_string(),
+            message: get_required(map, "MESSAGE")?.to_string(),
+        })
+    }
+}
+
+impl Config {
+    pub fn from_map(map: &HashMap<String, String>) -> Result<Self> {
+        Ok(Self {
+            account: AccountConfig::from_map(map)?,
+            proxy: ProxyConfig::from_map(map),
+            job: JobConfig::from_map(map)?,
         })
     }
 }
@@ -114,17 +151,17 @@ mod tests {
     #[test]
     fn parses_required_fields() {
         let cfg = Config::from_map(&base_map()).unwrap();
-        assert_eq!(cfg.api_id, 12345);
-        assert_eq!(cfg.api_hash, "abc");
-        assert_eq!(cfg.target_chat, "@foo");
-        assert_eq!(cfg.cron_expr, "*/5 * * * *");
-        assert_eq!(cfg.message, "hi");
+        assert_eq!(cfg.account.api_id, 12345);
+        assert_eq!(cfg.account.api_hash, "abc");
+        assert_eq!(cfg.job.target_chat, "@foo");
+        assert_eq!(cfg.job.cron_expr, "*/5 * * * *");
+        assert_eq!(cfg.job.message, "hi");
     }
 
     #[test]
     fn defaults_session_path_when_missing() {
         let cfg = Config::from_map(&base_map()).unwrap();
-        assert_eq!(cfg.session_path, "tg-cron-sender.session");
+        assert_eq!(cfg.account.session_path, "tg-cron-sender.session");
     }
 
     #[test]
@@ -147,7 +184,7 @@ mod tests {
         let mut m = base_map();
         m.insert("TARGET_TOPIC_ID".into(), "".into());
         let cfg = Config::from_map(&m).unwrap();
-        assert_eq!(cfg.target_topic_id, None);
+        assert_eq!(cfg.job.target_topic_id, None);
     }
 
     #[test]
@@ -155,7 +192,7 @@ mod tests {
         let mut m = base_map();
         m.insert("TARGET_TOPIC_ID".into(), "7310786".into());
         let cfg = Config::from_map(&m).unwrap();
-        assert_eq!(cfg.target_topic_id, Some(7310786));
+        assert_eq!(cfg.job.target_topic_id, Some(7310786));
     }
 
     #[test]
@@ -163,7 +200,7 @@ mod tests {
         let mut m = base_map();
         m.insert("TARGET_REPLY_TO_MSG_ID".into(), "42".into());
         let cfg = Config::from_map(&m).unwrap();
-        assert_eq!(cfg.target_reply_to_msg_id, Some(42));
+        assert_eq!(cfg.job.target_reply_to_msg_id, Some(42));
     }
 
     #[test]
@@ -171,14 +208,14 @@ mod tests {
         let mut m = base_map();
         m.insert("TARGET_REPLY_TO_MSG_ID".into(), "".into());
         let cfg = Config::from_map(&m).unwrap();
-        assert_eq!(cfg.target_reply_to_msg_id, None);
+        assert_eq!(cfg.job.target_reply_to_msg_id, None);
     }
 
     #[test]
     fn proxy_fields_optional() {
         let cfg = Config::from_map(&base_map()).unwrap();
-        assert!(cfg.proxy_type.is_none());
-        assert!(cfg.proxy_host.is_none());
+        assert!(cfg.proxy.proxy_type.is_none());
+        assert!(cfg.proxy.proxy_host.is_none());
     }
 
     #[test]
@@ -189,16 +226,16 @@ mod tests {
         m.insert("TG_PROXY_USERNAME".into(), "u".into());
         m.insert("TG_PROXY_PASSWORD".into(), "p".into());
         let cfg = Config::from_map(&m).unwrap();
-        assert_eq!(cfg.proxy_type.as_deref(), Some("socks5"));
-        assert_eq!(cfg.proxy_host.as_deref(), Some("127.0.0.1:1080"));
-        assert_eq!(cfg.proxy_username.as_deref(), Some("u"));
-        assert_eq!(cfg.proxy_password.as_deref(), Some("p"));
+        assert_eq!(cfg.proxy.proxy_type.as_deref(), Some("socks5"));
+        assert_eq!(cfg.proxy.proxy_host.as_deref(), Some("127.0.0.1:1080"));
+        assert_eq!(cfg.proxy.proxy_username.as_deref(), Some("u"));
+        assert_eq!(cfg.proxy.proxy_password.as_deref(), Some("p"));
     }
 
     #[test]
     fn login_method_default_is_auto() {
         let cfg = Config::from_map(&base_map()).unwrap();
-        assert_eq!(cfg.login_method, LoginMethod::Auto);
+        assert_eq!(cfg.account.login_method, LoginMethod::Auto);
     }
 
     #[test]
@@ -206,7 +243,7 @@ mod tests {
         let mut m = base_map();
         m.insert("LOGIN_METHOD".into(), "auto".into());
         assert_eq!(
-            Config::from_map(&m).unwrap().login_method,
+            Config::from_map(&m).unwrap().account.login_method,
             LoginMethod::Auto
         );
     }
@@ -216,7 +253,7 @@ mod tests {
         let mut m = base_map();
         m.insert("LOGIN_METHOD".into(), "password".into());
         assert_eq!(
-            Config::from_map(&m).unwrap().login_method,
+            Config::from_map(&m).unwrap().account.login_method,
             LoginMethod::Password
         );
     }
@@ -226,7 +263,7 @@ mod tests {
         let mut m = base_map();
         m.insert("LOGIN_METHOD".into(), "passkey".into());
         assert_eq!(
-            Config::from_map(&m).unwrap().login_method,
+            Config::from_map(&m).unwrap().account.login_method,
             LoginMethod::Passkey
         );
     }
@@ -236,7 +273,7 @@ mod tests {
         let mut m = base_map();
         m.insert("LOGIN_METHOD".into(), "Auto".into());
         assert_eq!(
-            Config::from_map(&m).unwrap().login_method,
+            Config::from_map(&m).unwrap().account.login_method,
             LoginMethod::Auto
         );
     }

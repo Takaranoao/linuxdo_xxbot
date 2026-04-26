@@ -8,6 +8,7 @@ use simple_logger::SimpleLogger;
 use tokio::signal;
 use tokio::time::{Instant, sleep_until};
 
+use tg_cron_sender::auth;
 use tg_cron_sender::client::ClientHandle;
 use tg_cron_sender::config::Config;
 use tg_cron_sender::proxy::build_proxy_url;
@@ -26,32 +27,36 @@ async fn main() -> Result<()> {
     let env_map: HashMap<String, String> = env::vars().collect();
     let config = Config::from_map(&env_map).context("load config from env")?;
     let proxy_url = build_proxy_url(
-        config.proxy_type.as_deref(),
-        config.proxy_host.as_deref(),
-        config.proxy_username.as_deref(),
-        config.proxy_password.as_deref(),
+        config.proxy.proxy_type.as_deref(),
+        config.proxy.proxy_host.as_deref(),
+        config.proxy.proxy_username.as_deref(),
+        config.proxy.proxy_password.as_deref(),
     )?;
     if let Some(ref u) = proxy_url {
         log::info!("using proxy: {}", redact_creds(u));
     }
 
-    let target = parse_target(&config.target_chat)?;
-    let schedule = Schedule::parse(&config.cron_expr)?;
+    let target = parse_target(&config.job.target_chat)?;
+    let schedule = Schedule::parse(&config.job.cron_expr)?;
 
-    let handle = ClientHandle::build(&config, proxy_url).await?;
-    handle
-        .ensure_logged_in(config.api_id, &config.api_hash, config.login_method)
-        .await?;
+    let handle = ClientHandle::build(&config.account, proxy_url).await?;
+    auth::ensure_logged_in(
+        &handle.client,
+        config.account.api_id,
+        &config.account.api_hash,
+        config.account.login_method,
+    )
+    .await?;
 
     let peer = handle.resolve_target(&target).await?;
     log::info!(
         "resolved target id={:?}, topic={:?}, reply_to={:?}",
         peer.id(),
-        config.target_topic_id,
-        config.target_reply_to_msg_id
+        config.job.target_topic_id,
+        config.job.target_reply_to_msg_id
     );
 
-    log::info!("entering cron loop ({})", config.cron_expr);
+    log::info!("entering cron loop ({})", config.job.cron_expr);
     loop {
         let now = Utc::now();
         let next = schedule
@@ -71,9 +76,9 @@ async fn main() -> Result<()> {
                 if let Err(e) = handle
                     .send(
                         &peer,
-                        config.target_topic_id,
-                        config.target_reply_to_msg_id,
-                        &config.message,
+                        config.job.target_topic_id,
+                        config.job.target_reply_to_msg_id,
+                        &config.job.message,
                     )
                     .await
                 {
